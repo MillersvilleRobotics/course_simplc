@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simulation API Tester</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 1rem;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      margin-bottom: 0.5rem;
+    }
+
+    .panel {
+      background: white;
+      padding: 1rem;
+      border-radius: 12px;
+      margin-bottom: 1rem;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    label {
+      display: block;
+      margin-top: 0.5rem;
+    }
+
+    input,
+    select {
+      padding: 0.4rem;
+      width: 200px;
+    }
+
+    button {
+      margin-top: 0.5rem;
+      padding: 0.5rem 1rem;
+      border: none;
+      background: #4a90e2;
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #3578c8;
+    }
+
+    #drawArea {
+      border: 2px solid #999;
+      border-radius: 8px;
+      background: #ffffff;
+      width: 800px;
+      height: 800px;
+      cursor: crosshair;
+    }
+
+    #svgArea {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+      min-height: 300px;
+    }
+
+    .mode-btn.active {
+      background: #2e6fd1 !important;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Simulation API Tester</h1>
+
+  <div class="panel">
+    <h2>Drawing Modes</h2>
+    <button id="modeLine">Draw Line</button>
+    <button id="modeCircle">Place Barrel</button>
+    <button id="modeBarrier">Place Barrier</button>
+  </div>
+
+  <div class="panel">
+    <h2>Canvas</h2>
+    <canvas id="drawArea" width="800" height="800"></canvas>
+    <div id="drawStatus"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Barrel Settings</h2>
+    <label>Radius: <input id="barrelR" type="number" value="3"></label>
+  </div>
+
+  <div class="panel">
+    <h2>Barrier Settings</h2>
+    <label>Width: <input id="barW" type="number" value="10"></label>
+    <label>Height: <input id="barH" type="number" value="2"></label>
+    <label>Orientation:
+      <select id="barOrient">
+        <option value="h">Horizontal</option>
+        <option value="v">Vertical</option>
+        <option value="d1">Diagonal /</option>
+        <option value="d2">Diagonal \</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="panel">
+    <h2>Simulation Control</h2>
+    <button onclick="startSim()">Start PLC</button>
+    <button onclick="stopSim()" style="background:#e94e4e; margin-left: 1rem;">Stop PLC</button>
+    <div id="simStatus"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Visualization</h2>
+    <button onclick="refreshSVG()">Refresh</button>
+    <div id="svgArea">(SVG will appear here)</div>
+  </div>
+
+  <script>
+    const base = "http://127.0.0.1:8080";
+
+    let mode = "line";
+
+    function setMode(newMode) {
+      mode = newMode;
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('modeLine').classList.toggle('active', mode === 'line');
+      document.getElementById('modeCircle').classList.toggle('active', mode === 'circle');
+      document.getElementById('modeBarrier').classList.toggle('active', mode === 'barrier');
+    }
+
+    document.getElementById('modeLine').onclick = () => setMode('line');
+    document.getElementById('modeCircle').onclick = () => setMode('circle');
+    document.getElementById('modeBarrier').onclick = () => setMode('barrier');
+
+    const canvas = document.getElementById('drawArea');
+    const ctx = canvas.getContext('2d');
+    let drawing = false, startX = 0, startY = 0;
+
+    function world(x) { return x * (200 / 800); }
+
+    canvas.addEventListener('mousedown', e => {
+      const r = canvas.getBoundingClientRect();
+      startX = e.clientX - r.left;
+      startY = e.clientY - r.top;
+      drawing = true;
+
+      if (mode === 'circle') {
+        const rad = parseFloat(document.getElementById('barrelR').value);
+        fetch(base + "/objects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "circle", x: world(startX), y: world(startY), radius: rad })
+        }).then(r => r.text()).then(t => drawStatus.innerText = t);
+      }
+
+      if (mode === 'barrier') {
+        const w = parseFloat(document.getElementById('barW').value);
+        const h = parseFloat(document.getElementById('barH').value);
+        const o = document.getElementById('barOrient').value;
+
+        let dx = 0, dy = 0;
+        if (o === 'h') { dx = w; dy = 0; }
+        if (o === 'v') { dx = 0; dy = h; }
+        if (o === 'd1') { dx = w; dy = -h; }
+        if (o === 'd2') { dx = w; dy = h; }
+
+        fetch(base + "/objects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ x1: world(startX), y1: world(startY), x2: world(startX + dx), y2: world(startY + dy) })
+        }).then(r => r.text()).then(t => drawStatus.innerText = t);
+      }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      if (!drawing || mode !== 'line') return;
+      const r = canvas.getBoundingClientRect();
+      const x = e.clientX - r.left;
+      const y = e.clientY - r.top;
+      ctx.clearRect(0, 0, 800, 800);
+      ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(x, y);
+      ctx.strokeStyle = "#e94e4e"; ctx.lineWidth = 2; ctx.stroke();
+    });
+
+    canvas.addEventListener('mouseup', e => {
+      if (mode !== 'line') { drawing = false; return; }
+      drawing = false;
+      const r = canvas.getBoundingClientRect();
+      const x2 = e.clientX - r.left;
+      const y2 = e.clientY - r.top;
+
+      ctx.clearRect(0, 0, 800, 800);
+      ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(x2, y2);
+      ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.stroke();
+
+      fetch(base + "/lines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x1: world(startX), y1: world(startY), x2: world(x2), y2: world(y2) })
+      }).then(r => r.text()).then(t => drawStatus.innerText = t);
+    });
+
+    let simRunning = false;
+
+    async function startSim() {
+      const res = await fetch(base + "/sim/start", { method: "POST" });
+      document.getElementById('simStatus').innerText = await res.text();
+      simRunning = true;      // enable auto-refresh
+    }
+
+    async function stopSim() {
+      const res = await fetch(base + "/sim/stop", { method: "POST" });
+      document.getElementById('simStatus').innerText = await res.text();
+      simRunning = false;     // disable auto-refresh
+    }
+
+    async function refreshSVG() {
+      if (!simRunning) return;   // only refresh when running
+
+      const res = await fetch(base + "/visualize");
+      const svg = await res.text();
+      document.getElementById("svgArea").innerHTML = svg;
+    }
+
+    // Auto-refresh (conditional)
+    setInterval(refreshSVG, 300);
+  </script>
+</body>
+
+</html>
