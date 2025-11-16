@@ -1,5 +1,6 @@
 #include "ApiServer.hpp"
 #include <crow.h>
+#include <crow/middlewares/cors.h>
 #include <mutex>
 #include <string>
 
@@ -205,7 +206,7 @@ std::string renderSimulationSvg(const VirtualPLC &plc, bool drawQuadtree = false
     //----------------------------------------------------------------------
     // 7. Camera Rays
     //----------------------------------------------------------------------
-    
+
     {
         auto data = plc.camera.lastScan;
         if (!data.empty()) {
@@ -255,7 +256,7 @@ std::string renderSimulationSvg(const VirtualPLC &plc, bool drawQuadtree = false
 
 void startApiServer(SimulationContext &ctx)
 {
-    crow::SimpleApp app;
+    static crow::App<crow::CORSHandler> app;
 
     // --------------------------
     // POST /objects  (circle OR aarect)

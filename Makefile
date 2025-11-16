@@ -2,7 +2,7 @@
 # Adjust source files, compiler flags, and library paths as needed.
 
 CXX := g++
-CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -Wpedantic -pthread
+CXXFLAGS := -std=c++20 -O0 -g -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra -Wpedantic -pthread
 
 # Include directory for headers
 INCLUDES := -Iinclude
