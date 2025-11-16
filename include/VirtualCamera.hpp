@@ -75,4 +75,9 @@ public:
 
     return distances;
   }
+
+  double getFOV()
+  {
+    return fov;
+  }
 };

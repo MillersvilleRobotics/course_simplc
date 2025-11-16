@@ -35,14 +35,17 @@ private:
     int loopTimeMs;
     bool running = false;
 
-    VirtualRobot &robot;
+    
 
-    VirtualGPS &gps;
+public:
+    VirtualRobot &robot;
     VirtualLidar<ISpatial> &lidar;
     VirtualCamera<LineSegment, ISpatial> &camera;
     PathfindingCallback controlLogic;
+    Quadtree<LineSegment> &lines;
+    Quadtree<ISpatial> &objects;
+    VirtualGPS &gps;
 
-public:
     VirtualPLC(int loopTimeMs,
                VirtualRobot &robot,
                Quadtree<LineSegment> &lines,
@@ -51,14 +54,17 @@ public:
                VirtualLidar<ISpatial> &lidar,
                VirtualCamera<LineSegment, ISpatial> &camera,
                PathfindingCallback cb)
-        : loopTimeMs(loopTimeMs),
+        :
+          // MUST MATCH THE ORDER OF MEMBER DECLARATIONS ABOVE
+          loopTimeMs(loopTimeMs),
+          running(false),
           robot(robot),
-          lines(lines),
-          objects(objects),
-          gps(gps),
           lidar(lidar),
           camera(camera),
-          controlLogic(cb)
+          controlLogic(cb),
+          lines(lines),
+          objects(objects),
+          gps(gps)
     {
     }
 
@@ -82,12 +88,6 @@ public:
     }
 
     void stop() { running = false; }
-    
-    // Lines remain typed (LineSegment)
-    Quadtree<LineSegment> &lines;
-
-    // Objects are heterogeneous — use interface pointer
-    Quadtree<ISpatial> &objects;
 
 private:
     void stepPLC()
@@ -101,7 +101,7 @@ private:
         double leftTargetSpeed = 0;
         double rightTargetSpeed = 0;
 
-        // CALL USER PATHFINDING
+        // Invoke user pathfinding logic
         controlLogic(gpsReading, cameraData, lidarData, leftTargetSpeed, rightTargetSpeed);
 
         // Send commands to virtual motors

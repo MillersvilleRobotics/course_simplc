@@ -9,7 +9,6 @@
 
 // System
 #include <cmath>
-#include <corecrt_math_defines.h>
 
 // Local
 #include "VirtualMotor.hpp"

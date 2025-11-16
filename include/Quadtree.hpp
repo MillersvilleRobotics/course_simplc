@@ -77,7 +77,6 @@ public:
 
   bool isLeaf() const { return children[0] == nullptr; }
 
-private:
   AABB bounds;
   int maxDepth;
   int maxObjects;

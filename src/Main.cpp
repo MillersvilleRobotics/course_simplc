@@ -34,7 +34,6 @@ int main()
         static constexpr int GRID_SIZE = 100;
         static constexpr double CELL = 0.2; // 20cm resolution
 
-        // >>> NEW: map centered on world midpoint (100,100)
         static constexpr double MAP_CENTER_X = 100.0;
         static constexpr double MAP_CENTER_Y = 100.0;
 
@@ -61,7 +60,7 @@ int main()
         };
 
         // ─────────────────────────────────────────────
-        // 2. LIDAR → occupancy
+        // 2. LIDAR → Occupancy
         // ─────────────────────────────────────────────
         int N = lidar.size();
         if (N > 0)
@@ -76,6 +75,37 @@ int main()
 
                 double angle = gps.heading + i * angleStep;
 
+                // World hit point
+                double wx = gps.x + std::cos(angle) * dist;
+                double wy = gps.y + std::sin(angle) * dist;
+
+                auto [gx, gy] = worldToGrid(wx, wy);
+
+                if (gx >= 0 && gx < GRID_SIZE &&
+                    gy >= 0 && gy < GRID_SIZE)
+                {
+                    grid[gy][gx] = 1; // occupied
+                }
+            }
+        }
+
+        // ─────────────────────────────────────────────
+        // 2b. CAMERA → Occupancy (line detection)
+        // ─────────────────────────────────────────────
+        int C = cam.size();
+        if (C > 0)
+        {
+            double angleStep = 2.0 * M_PI / C;
+
+            for (int i = 0; i < C; ++i)
+            {
+                double dist = cam[i];
+                if (dist <= 0.01)
+                    continue;
+
+                double angle = gps.heading + i * angleStep;
+
+                // World hit point
                 double wx = gps.x + std::cos(angle) * dist;
                 double wy = gps.y + std::sin(angle) * dist;
 
@@ -102,6 +132,7 @@ int main()
         queue.clear();
 
         int start = GRID_SIZE / 2;
+
         grid[start][start] = 0;
         visited[start][start] = true;
         queue.emplace_back(start, start);
@@ -113,15 +144,18 @@ int main()
             auto [cx, cy] = queue.back();
             queue.pop_back();
 
-            const int dirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            const int dirs[4][2] = {
+                {1, 0}, {-1, 0}, {0, 1}, {0, -1}};
 
             for (auto &d : dirs)
             {
                 int nx = cx + d[0];
                 int ny = cy + d[1];
 
-                if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE)
+                if (nx < 0 || nx >= GRID_SIZE ||
+                    ny < 0 || ny >= GRID_SIZE)
                     continue;
+
                 if (visited[ny][nx])
                     continue;
 
@@ -133,7 +167,7 @@ int main()
                 if (grid[ny][nx] == -1)
                     frontier.emplace_back(nx, ny);
 
-                grid[ny][nx] = 0;
+                grid[ny][nx] = 0; // free
                 queue.emplace_back(nx, ny);
             }
         }
@@ -143,6 +177,7 @@ int main()
         // ─────────────────────────────────────────────
         if (frontier.empty())
         {
+            // Nowhere left to explore → spin
             left = -0.3;
             right = 0.3;
             return;
@@ -171,13 +206,14 @@ int main()
         double targetY = MAP_CENTER_Y + (best.second - start) * CELL;
 
         // ─────────────────────────────────────────────
-        // 5. Steering
+        // 5. Steering toward frontier
         // ─────────────────────────────────────────────
         double dx = targetX - gps.x;
         double dy = targetY - gps.y;
 
         double desiredYaw = std::atan2(dy, dx);
 
+        // Normalize error
         double err = desiredYaw - gps.heading;
         while (err > M_PI)
             err -= 2 * M_PI;

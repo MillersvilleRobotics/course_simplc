@@ -4,7 +4,254 @@
 #include <string>
 
 // External visualization (optional)
-extern std::string renderSimulationSvg(const VirtualPLC &plc);
+#include <sstream>
+#include <iomanip>
+
+static void collectQuadtreeBounds(const AABB &b, double &minX, double &maxX, double &minY, double &maxY)
+{
+    minX = std::min(minX, b.min.x);
+    minY = std::min(minY, b.min.y);
+    maxX = std::max(maxX, b.max.x);
+    maxY = std::max(maxY, b.max.y);
+}
+
+static void collectQuadtreeLines(const Quadtree<LineSegment> &qt, std::vector<const LineSegment *> &out)
+{
+    // Query entire world
+    std::vector<LineSegment *> tmp;
+    qt.query(qt.bounds, tmp);
+    for (auto *p : tmp)
+        out.push_back(p);
+}
+
+static void collectQuadtreeObjects(const Quadtree<ISpatial> &qt, std::vector<const ISpatial *> &out)
+{
+    std::vector<ISpatial *> tmp;
+    qt.query(qt.bounds, tmp);
+    for (auto *p : tmp)
+        out.push_back(p);
+}
+
+static void renderQuadtreeRecursive(std::ostringstream &ss, const Quadtree<LineSegment> &qt)
+{
+    const auto &b = qt.bounds;
+    ss << "<rect x=\"" << b.min.x << "\" y=\"" << -b.max.y
+       << "\" width=\"" << (b.max.x - b.min.x)
+       << "\" height=\"" << (b.max.y - b.min.y)
+       << "\" fill=\"none\" stroke=\"rgba(0,0,255,0.15)\" stroke-width=\"0.02\" />\n";
+
+    if (!qt.isLeaf())
+    {
+        for (const auto &c : qt.children)
+            renderQuadtreeRecursive(ss, *c);
+    }
+}
+
+static void renderQuadtreeRecursiveObj(std::ostringstream &ss, const Quadtree<ISpatial> &qt)
+{
+    const auto &b = qt.bounds;
+    ss << "<rect x=\"" << b.min.x << "\" y=\"" << -b.max.y
+       << "\" width=\"" << (b.max.x - b.min.x)
+       << "\" height=\"" << (b.max.y - b.min.y)
+       << "\" fill=\"none\" stroke=\"rgba(255,0,0,0.15)\" stroke-width=\"0.02\" />\n";
+
+    if (!qt.isLeaf())
+    {
+        for (const auto &c : qt.children)
+            renderQuadtreeRecursiveObj(ss, *c);
+    }
+}
+
+std::string renderSimulationSvg(const VirtualPLC &plc, bool drawQuadtree = false)
+{
+    const auto &robot = plc.robot;
+    const auto &gps = plc.gps;
+    const auto &linesQT = plc.lines;
+    const auto &objectsQT = plc.objects;
+
+    //----------------------------------------------------------------------
+    // 1. Gather world bounds
+    //----------------------------------------------------------------------
+    double minX = 1e9, minY = 1e9;
+    double maxX = -1e9, maxY = -1e9;
+
+    collectQuadtreeBounds(linesQT.bounds, minX, maxX, minY, maxY);
+    collectQuadtreeBounds(objectsQT.bounds, minX, maxX, minY, maxY);
+
+    double margin = 2.0; // extra padding
+    minX -= margin;
+    maxX += margin;
+    minY -= margin;
+    maxY += margin;
+
+    double width = maxX - minX;
+    double height = maxY - minY;
+
+    //----------------------------------------------------------------------
+    // 2. SVG HEADER
+    //----------------------------------------------------------------------
+    std::ostringstream ss;
+    ss << "<svg xmlns=\"http://www.w3.org/2000/svg\" "
+       << "width=\"800\" height=\"" << (800 * (height / width)) << "\" "
+       << "viewBox=\"" << minX << " " << -maxY << " " << width << " " << height
+       << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n";
+
+    ss << "<rect x=\"" << minX << "\" y=\"" << -maxY << "\" width=\"" << width
+       << "\" height=\"" << height
+       << "\" fill=\"white\" stroke=\"black\" stroke-width=\"0.05\" />\n";
+
+    //----------------------------------------------------------------------
+    // 3. Draw Lines
+    //----------------------------------------------------------------------
+    {
+        std::vector<const LineSegment *> lines;
+        collectQuadtreeLines(linesQT, lines);
+
+        ss << "<g stroke=\"black\" stroke-width=\"0.05\">\n";
+        for (auto *L : lines)
+        {
+            ss << "<line x1=\"" << L->p1.x << "\" y1=\"" << -L->p1.y
+               << "\" x2=\"" << L->p2.x << "\" y2=\"" << -L->p2.y << "\" />\n";
+        }
+        ss << "</g>\n";
+    }
+
+    //----------------------------------------------------------------------
+    // 4. Draw Objects (ISpatial → AABB box)
+    //----------------------------------------------------------------------
+    {
+        std::vector<const ISpatial *> objs;
+        collectQuadtreeObjects(objectsQT, objs);
+
+        ss << "<g fill=\"rgba(255,0,0,0.3)\" stroke=\"red\" stroke-width=\"0.05\">\n";
+        for (auto *o : objs)
+        {
+            const AABB &box = o->getAABB();
+            ss << "<rect x=\"" << box.min.x
+               << "\" y=\"" << -box.max.y
+               << "\" width=\"" << (box.max.x - box.min.x)
+               << "\" height=\"" << (box.max.y - box.min.y)
+               << "\" />\n";
+        }
+        ss << "</g>\n";
+    }
+
+    //----------------------------------------------------------------------
+    // 5. Draw Robot
+    //----------------------------------------------------------------------
+    {
+        const auto &p = robot.getPose();
+
+        double r = robot.getLength() * 0.4; // triangle radius
+        double x = p.x;
+        double y = p.y;
+        double h = p.heading;
+
+        double x1 = x + r * std::cos(h);
+        double y1 = y + r * std::sin(h);
+
+        double x2 = x + r * std::cos(h + 2.5);
+        double y2 = y + r * std::sin(h + 2.5);
+
+        double x3 = x + r * std::cos(h - 2.5);
+        double y3 = y + r * std::sin(h - 2.5);
+
+        ss << "<polygon points=\""
+           << x1 << "," << -y1 << " "
+           << x2 << "," << -y2 << " "
+           << x3 << "," << -y3
+           << "\" fill=\"yellow\" stroke=\"black\" stroke-width=\"0.05\" />\n";
+
+        // heading arrow
+        ss << "<line x1=\"" << x << "\" y1=\"" << -y
+           << "\" x2=\"" << (x + r * 1.4 * std::cos(h)) << "\" y2=\"" << -(y + r * 1.4 * std::sin(h))
+           << "\" stroke=\"black\" stroke-width=\"0.05\" />\n";
+    }
+
+    /*
+    TODO: SHOW RAYS
+    //----------------------------------------------------------------------
+    // 6. LIDAR Rays
+    //----------------------------------------------------------------------
+    {
+        auto data = plc.lidar.lastScan;
+        if (!data.empty())
+        {
+            const auto pose = robot.getSensorWorldPose(plc.lidar.getMountID());
+            double baseX = pose.x;
+            double baseY = pose.y;
+            double baseH = pose.heading;
+
+            double angStep = 2 * M_PI / data.size();
+
+            ss << "<g stroke=\"rgba(0,150,255,0.4)\" stroke-width=\"0.03\">\n";
+            for (int i = 0; i < (int)data.size(); ++i)
+            {
+                double d = data[i];
+                if (d <= 0)
+                    continue;
+
+                double a = baseH + i * angStep;
+                double hx = baseX + std::cos(a) * d;
+                double hy = baseY + std::sin(a) * d;
+
+                ss << "<line x1=\"" << baseX << "\" y1=\"" << -baseY
+                   << "\" x2=\"" << hx << "\" y2=\"" << -hy << "\" />\n";
+            }
+            ss << "</g>\n";
+        }
+    }
+
+    //----------------------------------------------------------------------
+    // 7. Camera Rays
+    //----------------------------------------------------------------------
+    
+    {
+        auto data = plc.camera.lastScan;
+        if (!data.empty()) {
+            const auto pose = robot.getSensorWorldPose(plc.camera.getMountID());
+            double baseX = pose.x;
+            double baseY = pose.y;
+            double baseH = pose.heading;
+
+            double fov = plc.camera.getFOV(); // you have this in your type
+            double ang0 = baseH - fov / 2.0;
+            double angStep = fov / data.size();
+
+            ss << "<g stroke=\"rgba(255,150,0,0.4)\" stroke-width=\"0.03\">\n";
+            for (int i = 0; i < (int)data.size(); ++i) {
+                double d = data[i];
+                if (d <= 0) continue;
+
+                double a = ang0 + i * angStep;
+                double hx = baseX + std::cos(a) * d;
+                double hy = baseY + std::sin(a) * d;
+
+                ss << "<line x1=\"" << baseX << "\" y1=\"" << -baseY
+                   << "\" x2=\"" << hx    << "\" y2=\"" << -hy << "\" />\n";
+            }
+            ss << "</g>\n";
+        }
+    }
+    */
+
+    //----------------------------------------------------------------------
+    // 8. Quadtree boundaries (optional)
+    //----------------------------------------------------------------------
+    if (drawQuadtree)
+    {
+        ss << "<g>\n";
+        renderQuadtreeRecursive(ss, linesQT);
+        renderQuadtreeRecursiveObj(ss, objectsQT);
+        ss << "</g>\n";
+    }
+
+    //----------------------------------------------------------------------
+    // 9. Footer
+    //----------------------------------------------------------------------
+    ss << "</svg>\n";
+    return ss.str();
+}
 
 void startApiServer(SimulationContext &ctx)
 {
